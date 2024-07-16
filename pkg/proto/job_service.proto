@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+option go_package = "github.com/dustinevan/jogger/pkg/proto/task/v1;taskv1";
+
+service JobService {
+  // Start submits a job to the server for running. The job is started by the
+  // server when resources become available asynchronously from this call
+  rpc Start(StartJobRequest) returns (StartJobResponse);
+  // Stop stops a job that is running on the server. Stop gives the job 10 seconds
+  // to clean up resources before it exists, otherwise the job is killed. This method
+  // is synchronous, when it returns without error, the job is guaranteed to be stopped
+  rpc Stop(StopJobRequest) returns (StopJobResponse);
+  // Status returns the status of a job
+  rpc Status(JobStatusRequest) returns (JobStatusResponse);
+  // Output streams the output of a job, including running jobs.
+  rpc Output(JobOutputRequest) returns (stream JobOutputResponse);
+}
+
+// Request for Start
+message StartJobRequest {
+  // The job to start
+  Job job = 1;
+}
+
+message Job {
+  //
+  string job = 1;
+  string with_job_id = 2;
+}
+
+message StartJobResponse {
+  string job_id = 1;
+}
+
+message StopJobRequest {
+  string job_id = 1;
+}
+
+message StopJobResponse {
+  JobStatus status = 1;
+}
+
+message JobStatusRequest {
+  string job_id = 1;
+}
+
+message JobStatusResponse {
+  JobStatus status = 1;
+}
+
+enum JobStatus {
+  STATUS_UNSPECIFIED = 0;
+  WAITING_FOR_RESOURCES = 1;
+  RUNNING = 2;
+  STOPPED = 3;
+  KILLED = 4;
+  FAILED = 5;
+  COMPLETED = 6;
+}
+
+message JobOutputRequest {
+  string job_id = 1;
+}
+
+message JobOutputResponse {
+  JobOutputData data = 1;
+}
+
+message JobOutputData {
+  bytes data = 1;
+}
+
