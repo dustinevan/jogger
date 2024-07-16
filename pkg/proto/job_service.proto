@@ -2,13 +2,13 @@ syntax = "proto3";
 
 option go_package = "github.com/dustinevan/jogger/pkg/proto/task/v1;taskv1";
 
+// JobService provides methods to manage remote jobs
 service JobService {
-  // Start submits a job to the server for running. The job is started by the
-  // server when resources become available asynchronously from this call
+  // Start runs a job on the server and responds with the job_id
   rpc Start(StartJobRequest) returns (StartJobResponse);
-  // Stop stops a job that is running on the server. Stop gives the job 10 seconds
-  // to clean up resources before it exists, otherwise the job is killed. This method
-  // is synchronous, when it returns without error, the job is guaranteed to be stopped
+  // Stop stops a job that is running on the server. The server sends a
+  // SIGTERM signal to the job and waits for it to exit. The job has 10 seconds
+  // to exit before the server sends a SIGKILL signal to the job.
   rpc Stop(StopJobRequest) returns (StopJobResponse);
   // Status returns the status of a job
   rpc Status(JobStatusRequest) returns (JobStatusResponse);
@@ -16,57 +16,85 @@ service JobService {
   rpc Output(JobOutputRequest) returns (stream JobOutputResponse);
 }
 
-// Request for Start
+// Request to start a job
 message StartJobRequest {
   // The job to start
   Job job = 1;
 }
 
+// Job represents a command and arguments to run on the server.
 message Job {
-  //
-  string job = 1;
-  string with_job_id = 2;
+  // the command to run
+  string cmd = 1;
+  // the arguments to pass to the command
+  repeated string args = 2;
 }
 
+// Response to starting a job
 message StartJobResponse {
+  // the job_id of the job that was started
   string job_id = 1;
 }
 
+// Request to stop a job
 message StopJobRequest {
+  // the job_id of the job to stop
   string job_id = 1;
 }
 
+// Response to stopping a job
 message StopJobResponse {
+  // the status of the job after stopping
   JobStatus status = 1;
 }
 
+// Request to get the status of a job
 message JobStatusRequest {
+  // the job_id of the job to get the status of
   string job_id = 1;
 }
 
+// Response to getting the status of a job
 message JobStatusResponse {
+  // the status of the job
   JobStatus status = 1;
 }
 
+// JobStatus represents the state a job is in
+// States after Running are all states where a process
+// is no longer running on the server.
 enum JobStatus {
+  // STATUS_UNSPECIFIED is an invalid state
   STATUS_UNSPECIFIED = 0;
-  WAITING_FOR_RESOURCES = 1;
-  RUNNING = 2;
-  STOPPED = 3;
-  KILLED = 4;
-  FAILED = 5;
-  COMPLETED = 6;
+  // RUNNING: A process is running on the server for the reference job
+  RUNNING = 1;
+  // STOPPED: The job exited after receiving a SIGTERM.
+  STOPPED = 2;
+  // KILLED: The job was sent a SIGTERM and failed to exit before a
+  // timeout. It was sent a SIGKILL. Jobs with this status may have
+  // left data or resources in an inconsistent state.
+  KILLED = 3;
+  // FAILED: The job exited with status > 0 without being sent a SIGTERM
+  // or SIGKILL
+  FAILED = 4;
+  // COMPLETED: The job exited with status = 0
+  COMPLETED = 5;
 }
 
+// Request to get the output of a job
 message JobOutputRequest {
+  // the job_id of the job to get the output of
   string job_id = 1;
 }
 
+// Response to getting the output of a job
 message JobOutputResponse {
   JobOutputData data = 1;
 }
 
+// JobOutputData is a chunk of data returned from a job output stream
 message JobOutputData {
+  // a chunk of data. This is limited server-side to 64KB
   bytes data = 1;
 }
 

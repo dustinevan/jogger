@@ -23,11 +23,11 @@ The CLI has 4 subcommands:
 #### UX 
 Our users have likely run jobs on remote servers via ssh. The Jogger CLI is different in a key way--it's not interactive. To make the CLI more familiar to these users, the goal is to reduce the CLI's footprint so that users can focus on the commands/jobs they run. The following design decisions stem from this thinking:
 
-#### Jobs are Just Command Strings. 
-The number of options in a shell is so large that jogger makes no attempt at structuring them. This reduces the number of flags and arguments that need to be typed to use the CLI. The downside however is that shell substitution happens on the client. There are ways to mitigate this, but for this project they are out of scope. 
+#### Jobs are Slices of Strings.
+When starting a job, the CLI slices os.Args to remove itself. The remaining []string defines the job, where arg[0] is the command to run on the server, and arg[1:] represent arguments to that command. One downside to this approach is that no shell substitution can take place after this point, which means for example that server environment vars can't be referenced. This strategy is used to avoid repeated flags like --command --arg etc.  
 
 #### Use Environment Variables For Connection Information
-The following environment variables are supported. These will also be prominently displayed in the USAGE info
+The CLI supports the following environment variables (client side). These will also be prominently displayed in the USAGE info
 ```bash
 export JOGGER_HOST=<host:port>
 export JOGGER_CA_CERT_FILE=<path-to-ca-cert>
@@ -35,23 +35,49 @@ export JOGGER_USER_CERT_FILE=<path-to-user-cert>
 export JOGGER_USER_PRIVATE_KEY=<path-to-user-private-key>
 ```
 
-#### Allow Users To Set JobIDs, Make Human Readable IDs by Default
-The `-n --name` flag is also available if users would like to specify the `job_id` when starting a job. When duplicates are encountered, a number will be added to the end. By default the `job_id` will be a slug that includes the name of the first command.    
-
 #### Note on CLI Security Configuration
-Each use of `jog` creates a new connection with mTLS. For this to work, the user private key file and certificate files should be listed in the environment variables above.
+Each use of `jog` creates a new connection with mTLS. For this to work, the user private key file and certificate files should be listed in the environment variables above. More details in [security](#security)
 
 #### Example Usage
 ```bash
-jog start echo 'run the job'
-jog start --name=foo echo 'run the job'
-jog stop --host=localhost:7654 foo
-jog status foo
-jog output foo
+jog [start | stop | status | output] [-h | --help] [-D --host address[:port]] [command [argument ...]]
+
+You must set the following to securely connect to the host:
+export JOGGER_CA_CERT_FILE=<path-to-ca-cert>
+export JOGGER_USER_CERT_FILE=<path-to-user-cert>
+export JOGGER_USER_PRIVATE_KEY=<path-to-user-private-key>
+
+The options are as follows:
+  -D --host       address[:port] full details: https://github.com/grpc/grpc/blob/master/doc/naming.md
+  -h --help       print this usage information
+
+Examples: 
+# Starting a job
+$ jog start --host=localhost:7654 echo 'echo the job'
+> started: uuid1
+
+# Setting the JOGGER_HOST environment variable means you don't need to use the --host flag every time
+export JOGGER_HOST=localhost:7654
+
+$ jog start echo 'run another one'
+> started: uuid2
+
+$ jog stop uuid2
+> uuid2 already exited with status: completed
+
+$ jog start long-running-job arg1 arg2 arg3
+> started: uuid3
+
+$ jog status uuid3
+> status: running
+
+$ jog output uuid1
+> log lines starting from the beginning and steaming until 
+this command is terminated or the job moves to a done state.
 ```
 
 ### Security
-The Jogger CLI and Server use mTLS to secure communication. For this project, we assume that some future outside service will be responsible for generating and distributing the necessary certificates and keys. For now, certs can be generated manually using `make gen-certs`.   
+The Jogger CLI and Server use mTLS to secure communication. For this project, we assume that some future outside service will be responsible for generating and distributing the necessary certificates and keys. For now, certs can be generated manually using `make gen-certs`.
 
 #### Notes on Keys and Certificates 
 For TLS keys, this project uses the ECDSA algorithm with the P256 curve. Keys are generated for the CA, the Jogger Server, and the User who has access to the CLI.
@@ -77,12 +103,18 @@ p, ok := peer.FromContext(ctx)
 The username then becomes a parameter in calls to the internal job manager
 
 ### Server
-The server implements a GRPC API with a service method for each of the CLI subcommands see: [job_service.proto](https://github.com/dustinevan/jogger/blob/develop/pkg/proto/job_service.proto)
+The server implements a GRPC API with a service method for each of the CLI subcommands. see: [job_service.proto](https://github.com/dustinevan/jogger/blob/develop/pkg/proto/job_service.proto)
 
 `make grpc` generates the protobuf, grpc client, and grpc server stubs. `buf` is used internally.
 
 after reading the username from the peer certificate the internal Job Manager API is called
 
+#### Environment Vars
+```bash
+export JOGGER_CA_CERT_FILE=<path-to-ca-cert>
+export JOGGER_SERVER_CERT_FILE=<path-to-user-cert>
+export JOGGER_SERVER_PRIVATE_KEY=<path-to-user-private-key>
+```
 
 ### Job Manager API
 The Job Manager API holds references to all jobs run since the server was started. Storing job data is out of scope, so everything is held in memory.
@@ -115,7 +147,7 @@ The Job Manager API holds references to all jobs run since the server was starte
   - The loop ends when the job enters one of the `done` states and all the data is read. 
 
 ### Concurrency
-It's likely that mutexes will be needed to protect the internal state of the Job Manager. The Job Manager will be the only place where mutexes are used.
+It's likely that mutexes will be needed to protect the internal state of the Job Manager.
 
 ### Context, Cancellation, and Graceful Shutdown
 - When the server is shutdown, the server needs to be stopped, then all running jobs need to be canceled. 
