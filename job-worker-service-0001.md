@@ -24,7 +24,7 @@ The CLI has 4 subcommands:
 Our users have likely run jobs on remote servers via ssh. The Jogger CLI is different in a key way--it's not interactive. To make the CLI more familiar to these users, the goal is to reduce the CLI's footprint so that users can focus on the commands/jobs they run. The following design decisions stem from this thinking:
 
 #### Jobs are Slices of Strings.
-When starting a job, the CLI slices os.Args to remove itself. The remaining []string defines the job, where arg[0] is the command to run on the server, and arg[1:] represent arguments to that command. One downside to this approach is that no shell substitution can take place after this point, which means for example that server environment vars can't be referenced. This strategy is used to avoid repeated flags like --command --arg etc.  
+When starting a job, the `jog` CLI slices `os.Args` to remove itself and its own arguments. The remaining `[]string` defines the job, where `arg[0]` is the command to run on the server, and arg[1:] represents arguments to that command. One downside to this approach is that no shell substitution can take place after this point, which means for example that server environment vars can't be referenced. This strategy is used to avoid repeated flags like --command --arg etc.  
 
 #### Use Environment Variables For Connection Information
 The CLI supports the following environment variables (client side). These will also be prominently displayed in the USAGE info
@@ -105,7 +105,7 @@ The username then becomes a parameter in calls to the internal job manager
 ### Server
 The server implements a GRPC API with a service method for each of the CLI subcommands. see: [job_service.proto](https://github.com/dustinevan/jogger/blob/develop/pkg/proto/job_service.proto)
 
-`make grpc` generates the protobuf, grpc client, and grpc server stubs. `buf` is used internally.
+`make grpc` generates the protobuf, grpc client, and grpc server stubs. The actual code generation is done by [`buf`](https://buf.build/).
 
 after reading the username from the peer certificate the internal Job Manager API is called
 
