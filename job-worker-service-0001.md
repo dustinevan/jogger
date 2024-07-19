@@ -7,24 +7,68 @@ state: draft
 
 ## What
 
-Jogger is a CLI and Server that allow users to run jobs on a remote servers--where the Jogger Server is deployed. Users can start, stop, check the status of their jobs, as well as examine the output for jobs that are finished or running.   
+Jogger is a system that allows users to run jobs on remote servers. It includes a CLI where users can start, stop, check the status of, and examine the output of jobs run remotely. Commands from the CLI connect to a remote host where the Jogger Server is present, which then manages job processes accordingly.
 
 ## Details
 
 ### CLI
-`jog`
+`jog` 
 
-The CLI has 4 subcommands:
-1. `start` -- sends a job to the server, output: `job_id`  
-2. `stop` -- sends a stop signal to the server for a given `job_id`, output: `status`
-3. `status` -- get the status of a job given the `job_id` output: `status`
-4. `output` -- given the `job_id` streams the output of a job, completed or running 
+#### Example Usage
+```bash
+# Note the use of the divider -- between jog cli inputs and the job command and args. 
+jog start [-D --host address[:port]] -- [command [argument ...]]
+jog [stop | status | output] [-D --host address[:port]] [job_id] 
+jog [-h | --help]
 
-#### UX 
+# You must set the following to securely connect to the host:
+export JOGGER_CA_CERT_FILE=<path-to-ca-cert>
+export JOGGER_USER_CERT_FILE=<path-to-user-cert>
+export JOGGER_USER_PRIVATE_KEY=<path-to-user-private-key>
+
+The options are as follows:
+  -D --host       address[:port] full details: https://github.com/grpc/grpc/blob/master/doc/naming.md
+  -h --help       print this usage information
+
+The commands are as follows:
+  start           start a job
+  stop            stop a job
+  status          get the status of a job
+  output          stream the output of a job
+ 
+ 
+# Examples: 
+# Starting a job
+$ jog start --host=localhost:7654 -- echo 'echo the job'
+> started: uuid1
+
+# Setting the JOGGER_HOST environment variable means you don't need to use the --host flag every time
+export JOGGER_HOST=localhost:7654
+
+$ jog start -- echo 'run another one'
+> started: uuid2
+
+$ jog stop uuid2
+> uuid2 already exited with status: completed
+
+$ jog start -- long-running-job arg1 arg2 arg3
+> started: uuid3
+
+$ jog status uuid3
+> status: running
+
+$ jog output uuid1
+> log lines starting from the beginning and steaming until 
+this command is terminated or the job moves to a done state.
+```
+
+#### UX
 Our users have likely run jobs on remote servers via ssh. The Jogger CLI is different in a key way--it's not interactive. To make the CLI more familiar to these users, the goal is to reduce the CLI's footprint so that users can focus on the commands/jobs they run. The following design decisions stem from this thinking:
 
 #### Jobs are Slices of Strings.
-When starting a job, the `jog` CLI slices `os.Args` to remove itself and its own arguments. The remaining `[]string` defines the job, where `arg[0]` is the command to run on the server, and arg[1:] represents arguments to that command. One downside to this approach is that no shell substitution can take place after this point, which means for example that server environment vars can't be referenced. This strategy is used to avoid repeated flags like --command --arg etc.  
+When starting a job, the `jog` CLI slices `os.Args` to remove itself and its own arguments, `--` is used as a divider for clarity. 
+
+The remaining `[]string` defines the job, where `arg[0]` is the command/binary to run on the server, and `arg[1:]` represents arguments to that command. This strategy avoids repeated flags for arguments and the environment. However, a downside to this approach is that server-side shell substitution requires careful escaping and the use of `bash -c`.
 
 #### Use Environment Variables For Connection Information
 The CLI supports the following environment variables (client side). These will also be prominently displayed in the USAGE info
@@ -36,60 +80,31 @@ export JOGGER_USER_PRIVATE_KEY=<path-to-user-private-key>
 ```
 
 #### Note on CLI Security Configuration
-Each use of `jog` creates a new connection with mTLS. For this to work, the user private key file and certificate files should be listed in the environment variables above. More details in [security](#security)
+Each use of `jog` creates a new connection with mTLS. For this to work, the user private key file and certificate files should be listed in the environment variables above. See: [Security](#security)
 
-#### Example Usage
-```bash
-jog [start | stop | status | output] [-h | --help] [-D --host address[:port]] [command [argument ...]]
+### GRPC
+GRPC is used for communication between Client and Server. The CLI subcommands described above map to RPC calls to a Jogger Server. See: [job_service.proto](https://github.com/dustinevan/jogger/blob/develop/pkg/proto/job_service.proto)
 
-You must set the following to securely connect to the host:
-export JOGGER_CA_CERT_FILE=<path-to-ca-cert>
-export JOGGER_USER_CERT_FILE=<path-to-user-cert>
-export JOGGER_USER_PRIVATE_KEY=<path-to-user-private-key>
-
-The options are as follows:
-  -D --host       address[:port] full details: https://github.com/grpc/grpc/blob/master/doc/naming.md
-  -h --help       print this usage information
-
-Examples: 
-# Starting a job
-$ jog start --host=localhost:7654 echo 'echo the job'
-> started: uuid1
-
-# Setting the JOGGER_HOST environment variable means you don't need to use the --host flag every time
-export JOGGER_HOST=localhost:7654
-
-$ jog start echo 'run another one'
-> started: uuid2
-
-$ jog stop uuid2
-> uuid2 already exited with status: completed
-
-$ jog start long-running-job arg1 arg2 arg3
-> started: uuid3
-
-$ jog status uuid3
-> status: running
-
-$ jog output uuid1
-> log lines starting from the beginning and steaming until 
-this command is terminated or the job moves to a done state.
-```
+[`buf`](https://buf.build/) is being used to generate the client, server stubs, and related protobuf code. The Makefile includes `make grpc` for this purpose.  
 
 ### Security
-The Jogger CLI and Server use mTLS to secure communication. For this project, we assume that some future outside service will be responsible for generating and distributing the necessary certificates and keys. For now, certs can be generated manually using `make gen-certs`.
+Client and Server communicate over a connection with [mTLS](https://en.wikipedia.org/wiki/Mutual_authentication#mTLS). Jogger is configured to use [X.509 certificates](https://www.rfc-editor.org/rfc/rfc5280) that have been manually generated using `make gen-certs` For this project, we assume that some future outside service will be responsible for generating and distributing the necessary certificates and keys. 
 
 #### Notes on Keys and Certificates 
 For TLS keys, this project uses the ECDSA algorithm with the P256 curve. Keys are generated for the CA, the Jogger Server, and the User who has access to the CLI.
+
 ```Go
 privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 ```
 Three certificates are then generated:
 1. _Self-Signed CA Certificate_: This certificate is used by both the Client and the Server to verify the identity of the other party. 
 2. _Server Certificate_: The Jogger Service uses this certificate to prove its identity to the CLI.
-3. _User Certificate_: The User Certificate has the username in the Common Name (CN)) field found here: `Userx509Certificate.Subject.CommonName` see: Access Control
+3. _User Certificate_: The User Certificate has the username in the Common Name (CN)) field found here: `Userx509Certificate.Subject.CommonName` see: [Access Control](#access-control)
 
 The file locations of these certificates are then added to the user or server environment vars, and read when a connection with mTLS is made.  
+
+#### TLS Cipher Suites
+TLS will be configured to support the `TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256` cipher suite, which is the [first preference](https://go.dev/src/crypto/tls/cipher_suites.go) in the go documentation. This suite only supports TLS 1.2 and contains our chosen algorithm.
 
 ### Access Control 
 Internally, the Jogger Server ensures that each user only has access to their jobs. To do this, usernames are included in Common Name field found in User Certificates. It is assumed that an external auth system will add these usernames to certs, and ensure usernames are unique. Currently, `make gen-certs` sets the Common Name to `$USER` in the generated User Certificate. If needed this can be modified like so `make USER=lucy gen-certs` To create multiple users the underlying gen-certs code should be edited.   
@@ -103,73 +118,107 @@ p, ok := peer.FromContext(ctx)
 The username then becomes a parameter in calls to the internal job manager
 
 ### Server
-The server implements a GRPC API with a service method for each of the CLI subcommands. see: [job_service.proto](https://github.com/dustinevan/jogger/blob/develop/pkg/proto/job_service.proto)
+The Jogger Server is present on a host where Jobs are run. It implements a GRPC service that accepts requests from the CLI, checks authorization by extracting the username from the User Certificate, and hands off work to the Job Manager API.
 
-`make grpc` generates the protobuf, grpc client, and grpc server stubs. The actual code generation is done by [`buf`](https://buf.build/).
+#### System Requirements
+- The server makes use of Linux cgroup-v2. It is recommended that it be run on a host with a [Linux distribution](https://github.com/opencontainers/runc/blob/main/docs/cgroup-v2.md) that enables and uses cgroup-v2 by default]
+- The server must be run with root permissions to manage cgroupfs.
 
-after reading the username from the peer certificate the internal Job Manager API is called
-
-#### Environment Vars
+#### Server mTLS Environment Variables
+The following environment variables are required for the server to securely connect to the client, and must be set before starting the server.
 ```bash
 export JOGGER_CA_CERT_FILE=<path-to-ca-cert>
 export JOGGER_SERVER_CERT_FILE=<path-to-user-cert>
 export JOGGER_SERVER_PRIVATE_KEY=<path-to-user-private-key>
 ```
 
-### Job Manager API
-The Job Manager API holds references to all jobs run since the server was started. Storing job data is out of scope, so everything is held in memory.
+### Job Manager
+The JobManager is an internal service that manages the lifecycle of jobs. It holds a map of []Job by username. Calls to it's exported API methods, `Start`, `Stop`, `Status`, and `Output`, search for the job by username and `job_id` and call associated methods on that Job. Job instances are wrappers around `exec.Cmd` that include extra functionality for output streaming, cancellation, status, and `cgroup-v2` management. 
 
-#### Starting A Job
-- cgroups-v2
-  - If this is a new user, add a new entry in the tree
-  - Once PID is available add it to user cgroup node
-- Set stdout and stderr buffers
-- Start `exec.Cmd` in a go routine -- include panic recover and cancellation
-- Set `exec.Cmd` cancel function to terminate first, then kill if needed
-- Implement a max concurrent jobs limit of 100
-- The job has started when the API returns without error.
-- Produce a single cancel function for each job that returns the end status
+#### Creating a Job
+When the client asks to start a job, the server creates a new job instance. During construction:
+- The job is assigned a unique id 
+- A child context is created with a cancel function. This context is passed to the `exec.Cmd` instance, and the cancel is held by the job for later use.
+- the `exec.Cmd` is created and composed with an `OutputStreamer`, a `Cancel` function that sends `SIGTERM`, and its `WaitDelay` is set.
+- cgroups-v2 setup and teardown functions are created
+- After completion, the job is added to the JobManager's map of jobs by username and job id.
 
-#### Stopping A Job
-- If the client cancels the context before the Start command returns, it should cancel the job.
-- Stop function calls the job's cancel function and returns the status
+> **_Note:_** _The status is left empty and will be set to Running when `Start` is called. The Jogger Server is designed to respond to the client after the job has started and this interim state is not visible client-side._
+
+#### Starting a Job
+When the `Start` method is called on a job, a goroutine is started that does the following:
+- Sets the job status to Running
+- Calls `Start` on the `exec.Cmd`
+- Calls the `cgroups-v2` `Setup` function
+- Defers the `cgroups-v2` `Teardown` function
+- Defers setting the status to completed if the status is still in running state
+- Waits for the cmd to finish
+
+> **_Note:_** _This goroutine does not watch for a context cancellation. Internally, the `exec.Cmd` instance watches for a context cancellation and will call the job's cancel function accordingly._
+
+#### Output Streaming
+Output stream requirements specify that the server should send the entire output of a job to the client when output is requested. For completed jobs, this is straightforward. For running jobs, the server should stream the output as it is produced. To do this for multiple clients, we need to collect `STDOUT` and `STDERR` pipes and then make the data available to multiple clients streams.
+
+This functionality is encapsulated in the `OutputStreamer` struct.
+```go
+type OutputStreamer struct {
+    // stdout and stderr are combined and written into the output byte slice 
+	output []byte
+	// streams is a slice of channels that are written to by the output goroutine
+	streams []chan []byte
+}
+...
+// OutputStreamer is an io.Writer and the jobs `exec.Cmd` Stdout and Stderr are set to this instance
+func (o *OutputStreamer) Write(p []byte) (n int, err error) {
+    // Write to o.output  
+}
+func (o *OutputStreamer) NewStream(ctx context.Context) <-chan []byte {
+    // create a new channel and start a looping goroutine that writes to it, keeps track of the index, and uses a ticker to check for new data, writing to the channel if found. 
+}
+...
+```
+#### Stream Closure and Cancellation
+The OutputStreamer handles closure and cancellation in the following ways:
+- When a client closes the stream context, the streaming goroutine closes the channel and exits. Note that this is the only case where the stream ends while the job process is still running.
+- When a job is stopped, completes, fails or is killed, the streaming goroutine finishes sending all the data, closes the channel and exits.
+- When the server is shut down, stop is called on all running jobs. Then and streams are canceled as in #2
+
+This next section diagrams job cancellation flow, including streams in detail. 
+
+
+#### Stopping a Job
+When the `Stop` method called on a job, the status is set and the internal context cancellation function is called. Jogger is designed to cascade this cancellation through all underlying goroutines. 
+
+> **_Note:_** _The `exec.Cmd` struct and API internally provide most of the functionality needed for cancellation and output streaming. Jogger is designed around preferring this functionality, and wrapping it with what's needed to support our output streaming and `cgroup-v2` requirements. In the diagram below, the internals of `exec.Cmd` are not shown._
+
+To get a full view of this flow, the diagram below models a user with two shells open
+- Window1: The output stream of running job `job-uuid1`.
+- Window2: The user executes `jog stop job-uuid1`
+
+We skip the CLI, Jogger Server, and Job Manager in this diagram to focus on the internals of the Job, exec.Cmd, and OutputStreamer.
+
+```mermaid
+sequenceDiagram
+    participant Job
+    participant exec.Cmd
+    participant OutputStreamer
+    participant User
+    Job->>exec.Cmd: Start
+    exec.Cmd->>OutputStreamer: Write
+    OutputStreamer->>User: Stream
+    User->>Job: Stop
+    Job->>exec.Cmd: Cancel
+    exec.Cmd->>OutputStreamer: Close
+    OutputStreamer->>User: Close
+```
 
 #### Getting the Status 
 - Look up the job by username and id, then return the status
 
-#### Streaming Output
-- Each command is set up with an externally defined buffer for stderr and stdout. 
-- When an output request is received, a read only channel of output data is provided. 
-- This channel is written to by a separate goroutine which is reading the stdout and stderr buffers 
-  - It can be canceled when the client closes the context
-  - It loops through the buffer and writes at most 64k chunks to the channel
-  - Writes happen within at least a second of it finding new data in the buffer
-  - The loop ends when the job enters one of the `done` states and all the data is read. 
-
-### Concurrency
-It's likely that mutexes will be needed to protect the internal state of the Job Manager.
-
-### Context, Cancellation, and Graceful Shutdown
-- When the server is shutdown, the server needs to be stopped, then all running jobs need to be canceled. 
-- If the server receives a context cancellation from the client before it returns, started jobs should be stopped, output streams should be stopped, and stop calls should be canceled
- if signals haven't been sent yet. 
-- The client is responsible for checking the status after canceling a stop request to see whether the job is still running or not. 
-
 #### cgroups-v2
-cgroups can be manually managed through the cgroup file system found at `/sys/fs/cgroup` in the project's Docker image. The cgroupfs controls resource allocation according to the 
-directory structure. By making new directories in the structure and adding PIDs to those directories, sibling directories are given equal resources by default.
+cgroups can be manually managed through the cgroup file system found at `/sys/fs/cgroup`. The cgroupfs controls resource allocation according to the directory structure. By making new directories in the structure, sibling directories are given equal resources by default.
 
 The Jogger cgroup implementation does the following:
 - When the Jogger server starts, a new cgroup is made for it: `mkdir /sys/fs/cgroup/jogger/`
 - The cpu, memory, and io controller are added for the jogger cgroup and its children
-- When a new user is encountered a new sub-level is created for it `mkdir /sys/fs/cgroup/jogger/<username>`
-- When a job is started, the PID is added to the user's `cgroup.procs` file
-
-Note
-: The Jogger Server must run with root permissions within the Docker container to manage cgroupfs. 
-: Because the Jogger Server is a parent of all the user cgroups its resources are not limited by the cgroupfs. This is important because the server needs to be able to manage all the user cgroups without being crowded out by users. It could be that resources need to be explicitly set aside for the server, but this is out of scope for this project.
- 
-
-### Docker
-- cgroups-v2 is a linux feature, for testing, the project includes a Ubuntu 24.04 image with Go 1.22.5. This dockerfile must be improved before production use.
-
+- When a new job is started a new cgroup is made for that job: `mkdir /sys/fs/cgroup/jogger/$JOBID`

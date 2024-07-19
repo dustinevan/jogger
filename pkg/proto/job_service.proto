@@ -94,7 +94,10 @@ message JobOutputResponse {
 
 // JobOutputData is a chunk of data returned from a job output stream
 message JobOutputData {
-  // a chunk of data. This is limited server-side to 64KB
+  // a chunk of data.
+  // this is the combination of STDIN and STDERR outputs
+  // This is currently limited server-side to 64KB based on the tcp max packet size
+  // this will need to be revisited to improve performance.
   bytes data = 1;
 }
 
