@@ -197,20 +197,15 @@ To get a full view of this flow, the diagram below models a user with two shells
 
 We skip the CLI, Jogger Server, and Job Manager in this diagram to focus on the internals of the Job, exec.Cmd, and OutputStreamer.
 
-```mermaid
-sequenceDiagram
-    participant Job
-    participant exec.Cmd
-    participant OutputStreamer
-    participant User
-    Job->>exec.Cmd: Start
-    exec.Cmd->>OutputStreamer: Write
-    OutputStreamer->>User: Stream
-    User->>Job: Stop
-    Job->>exec.Cmd: Cancel
-    exec.Cmd->>OutputStreamer: Close
-    OutputStreamer->>User: Close
-```
+1. The job.Stop() method is called by the Job Manager
+2. The job's status is set to `stopped` this is guarded by a mutex, duplicate stop calls are ignored
+3. the cancel function held internally by the job is called -- this cancels the context used by internal exec.Cmd
+4. exec.Cmd calls the cancel function created when it was started. This sends a SIGTERM to the process
+5. Meanwhile, the OutputStreamer is still streaming output data to the client
+6. The underlying process represented by exec.Cmd exits normally or is killed. If it is killed, the job status is set to `killed`
+7. exec.Cmd writes an EOF to the OutputStreamer and closes the stdout and stderr pipes
+8. OutputStreamer finishes sending all data to the client and closes the channel used for streaming
+9. The client receives the last of the output and the command prompt is returned
 
 #### Getting the Status 
 - Look up the job by username and id, then return the status
@@ -221,4 +216,4 @@ cgroups can be manually managed through the cgroup file system found at `/sys/fs
 The Jogger cgroup implementation does the following:
 - When the Jogger server starts, a new cgroup is made for it: `mkdir /sys/fs/cgroup/jogger/`
 - The cpu, memory, and io controller are added for the jogger cgroup and its children
-- When a new job is started a new cgroup is made for that job: `mkdir /sys/fs/cgroup/jogger/$JOBID`
+- When a new job is created it is started in the jogger cgroup using `cgexec -g cpu,memory,io:jogger <cmd>`
