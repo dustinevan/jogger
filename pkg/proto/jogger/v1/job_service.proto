@@ -1,6 +1,8 @@
 syntax = "proto3";
 
-option go_package = "github.com/dustinevan/jogger/pkg/proto/task/v1;taskv1";
+package jogger.v1;
+
+option go_package = "github.com/dustinevan/jogger/pkg/gen;joggerv1";
 
 // JobService provides methods to manage remote jobs
 service JobService {
@@ -64,21 +66,21 @@ message JobStatusResponse {
 // States after Running are all states where a process
 // is no longer running on the server.
 enum JobStatus {
-  // STATUS_UNSPECIFIED is an invalid state
-  STATUS_UNSPECIFIED = 0;
-  // RUNNING: A process is running on the server for the reference job
-  RUNNING = 1;
-  // STOPPED: The job exited after receiving a SIGTERM.
-  STOPPED = 2;
-  // KILLED: The job was sent a SIGTERM and failed to exit before a
+  // JOB_STATUS_STATUS_UNSPECIFIED is an invalid state
+  JOB_STATUS_STATUS_UNSPECIFIED = 0;
+  // JOB_STATUS_RUNNING: A process is running on the server for the reference job
+  JOB_STATUS_RUNNING = 1;
+  // JOB_STATUS_STOPPED: The job exited after receiving a SIGTERM.
+  JOB_STATUS_STOPPED = 2;
+  // JOB_STATUS_KILLED: The job was sent a SIGTERM and failed to exit before a
   // timeout. It was sent a SIGKILL. Jobs with this status may have
   // left data or resources in an inconsistent state.
-  KILLED = 3;
-  // FAILED: The job exited with status > 0 without being sent a SIGTERM
+  JOB_STATUS_KILLED = 3;
+  // JOB_STATUS_FAILED: The job exited with status > 0 without being sent a SIGTERM
   // or SIGKILL
-  FAILED = 4;
-  // COMPLETED: The job exited with status = 0
-  COMPLETED = 5;
+  JOB_STATUS_FAILED = 4;
+  // JOB_STATUS_COMPLETED: The job exited with status = 0
+  JOB_STATUS_COMPLETED = 5;
 }
 
 // Request to get the output of a job

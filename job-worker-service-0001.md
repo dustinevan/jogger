@@ -24,7 +24,7 @@ jog [-h | --help]
 # You must set the following to securely connect to the host:
 export JOGGER_CA_CERT_FILE=<path-to-ca-cert>
 export JOGGER_USER_CERT_FILE=<path-to-user-cert>
-export JOGGER_USER_PRIVATE_KEY=<path-to-user-private-key>
+export JOGGER_USER_KEY_FILE=<path-to-user-private-key>
 
 The options are as follows:
   -D --host       address[:port] full details: https://github.com/grpc/grpc/blob/master/doc/naming.md
@@ -76,7 +76,7 @@ The CLI supports the following environment variables (client side). These will a
 export JOGGER_HOST=<host:port>
 export JOGGER_CA_CERT_FILE=<path-to-ca-cert>
 export JOGGER_USER_CERT_FILE=<path-to-user-cert>
-export JOGGER_USER_PRIVATE_KEY=<path-to-user-private-key>
+export JOGGER_USER_KEY_FILE=<path-to-user-private-key>
 ```
 
 #### Note on CLI Security Configuration
@@ -129,24 +129,20 @@ The following environment variables are required for the server to securely conn
 ```bash
 export JOGGER_CA_CERT_FILE=<path-to-ca-cert>
 export JOGGER_SERVER_CERT_FILE=<path-to-user-cert>
-export JOGGER_SERVER_PRIVATE_KEY=<path-to-user-private-key>
+export JOGGER_SERVER_KEY=<path-to-user-private-key>
 ```
 
 ### Job Manager
-The JobManager is an internal service that manages the lifecycle of jobs. It holds a map of []Job by username. Calls to it's exported API methods, `Start`, `Stop`, `Status`, and `Output`, search for the job by username and `job_id` and call associated methods on that Job. Job instances are wrappers around `exec.Cmd` that include extra functionality for output streaming, cancellation, status, and `cgroup-v2` management. 
-
-#### Creating a Job
-When the client asks to start a job, the server creates a new job instance. During construction:
-- The job is assigned a unique id 
-- A child context is created with a cancel function. This context is passed to the `exec.Cmd` instance, and the cancel is held by the job for later use.
-- the `exec.Cmd` is created and composed with an `OutputStreamer`, a `Cancel` function that sends `SIGTERM`, and its `WaitDelay` is set.
-- cgroups-v2 setup and teardown functions are created
-- After completion, the job is added to the JobManager's map of jobs by username and job id.
-
-> **_Note:_** _The status is left empty and will be set to Running when `Start` is called. The Jogger Server is designed to respond to the client after the job has started and this interim state is not visible client-side._
+The JobManager is an internal service that manages the lifecycle of jobs. It holds a map of Job by job_id:username. Calls to it's exported API methods, `Start`, `Stop`, `Status`, and `Output`, search for the job by username and `job_id` and call associated methods on that Job. Job instances are wrappers around `exec.Cmd` that include extra functionality for output streaming, cancellation, status, and `cgroup-v2` management. 
 
 #### Starting a Job
-When the `Start` method is called on a job, a goroutine is started that does the following:
+When the client asks to start a job, first the server creates a new job instance. During construction:
+- The job is assigned a uuid
+- A child context of the server context is created with a cancel function. This context is passed to the `exec.Cmd` instance, and the cancel is held by the job for later use.
+- the `exec.Cmd` is created and composed with an `OutputStreamer`, a `Cancel` function that sends `SIGTERM`, and its `WaitDelay` is set.
+- cgroups-v2 setup and teardown functions are created
+
+When construction is complete, the `Start` method is called on a job. This method starts a goroutine that does the following:
 - Sets the job status to Running
 - Calls `Start` on the `exec.Cmd`
 - Calls the `cgroups-v2` `Setup` function
@@ -164,8 +160,7 @@ This functionality is encapsulated in the `OutputStreamer` struct.
 type OutputStreamer struct {
     // stdout and stderr are combined and written into the output byte slice 
 	output []byte
-	// streams is a slice of channels that are written to by the output goroutine
-	streams []chan []byte
+	writerClosed atomic.Bool
 }
 ...
 // OutputStreamer is an io.Writer and the jobs `exec.Cmd` Stdout and Stderr are set to this instance
@@ -175,15 +170,17 @@ func (o *OutputStreamer) Write(p []byte) (n int, err error) {
 func (o *OutputStreamer) NewStream(ctx context.Context) <-chan []byte {
     // create a new channel and start a looping goroutine that writes to it, keeps track of the index, and uses a ticker to check for new data, writing to the channel if found. 
 }
+
+func (o *OutputStreamer) CloseWriter() {
+    // close the channel and set the output to nil
+}
 ...
 ```
 #### Stream Closure and Cancellation
 The OutputStreamer handles closure and cancellation in the following ways:
 - When a client closes the stream context, the streaming goroutine closes the channel and exits. Note that this is the only case where the stream ends while the job process is still running.
 - When a job is stopped, completes, fails or is killed, the streaming goroutine finishes sending all the data, closes the channel and exits.
-- When the server is shut down, stop is called on all running jobs. Then and streams are canceled as in #2
-
-This next section diagrams job cancellation flow, including streams in detail. 
+- When the server is shut down, its context is cancelled, the context of all exec.Cmd instances are children of this context. exec.Cmd intances each call the cancel functions given them, and streams are canceled as in #2
 
 
 #### Stopping a Job
@@ -197,14 +194,14 @@ To get a full view of this flow, the diagram below models a user with two shells
 
 We skip the CLI, Jogger Server, and Job Manager in this diagram to focus on the internals of the Job, exec.Cmd, and OutputStreamer.
 
-1. The job.Stop() method is called by the Job Manager
-2. The job's status is set to `stopped` this is guarded by a mutex, duplicate stop calls are ignored
-3. the cancel function held internally by the job is called -- this cancels the context used by internal exec.Cmd
-4. exec.Cmd calls the cancel function created when it was started. This sends a SIGTERM to the process
-5. Meanwhile, the OutputStreamer is still streaming output data to the client
-6. The underlying process represented by exec.Cmd exits normally or is killed. If it is killed, the job status is set to `killed`
-7. exec.Cmd writes an EOF to the OutputStreamer and closes the stdout and stderr pipes
-8. OutputStreamer finishes sending all data to the client and closes the channel used for streaming
+1. The `job.Stop()` method is called by the Job Manager
+2. the cancel function held internally by the job is called -- this cancels the context used by internal exec.Cmd
+3. `exec.Cmd` calls the cancel function created when it was started. This sends a `SIGTERM` to the process
+4. Meanwhile, the OutputStreamer is still streaming output data to the client
+5. The underlying process represented by `exec.Cmd` exits normally or is killed based on the WaitDelay.
+6. The error output of `cmd.Wait()` is used to determine the final status of the job
+7. The goroutine waiting for the process to finish defer closes the OutputStreamer and exits.
+8. OutputStreamer finishes sending all data to the client and closes the channel used for streaming 
 9. The client receives the last of the output and the command prompt is returned
 
 #### Getting the Status 
