@@ -68,13 +68,7 @@ install-cli: build-cli
 gen-certs:
 	go run ./cmd/tools/gencerts/main.go
 
-
-.PHONY: copy-exports
-copy-exports:
-	echo "export JOGGER_HOST=localhost:50051\n \
- 	export JOGGER_CA_CERT_FILE=$(PWD)/certs/ca_tls.crt\n \
- 	export JOGGER_SERVER_CERT_FILE=$(PWD)/certs/server1_tls.crt\n \
- 	export JOGGER_SERVER_KEY_FILE=$(PWD)/certs/server1_tls.key\n \
-	export JOGGER_USER_CERT_FILE=$(PWD)/certs/user1_tls.crt\n \
-	export JOGGER_USER_KEY_FILE=$(PWD)/certs/user1_tls.key\n" | pbcopy
-
+# Run the tests
+.PHONY: test
+test:
+	go test ./...
