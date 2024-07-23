@@ -2,8 +2,10 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	jogv1 "github.com/dustinevan/jogger/pkg/gen/jogger/v1"
+	"io"
 )
 
 func Run(ctx context.Context, client jogv1.JobServiceClient, cmd *Command) error {
@@ -56,8 +58,21 @@ func runOutput(ctx context.Context, client jogv1.JobServiceClient, cmd *Command)
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
-			return fmt.Errorf("receiving output: %w", err)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			err = fmt.Errorf("receiving output: %w", err)
 		}
-		fmt.Printf("%s", resp.Data)
+		fmt.Printf("%s", resp.Data.Data)
 	}
+
+	closeErr := stream.CloseSend()
+	if closeErr != nil {
+		if err != nil {
+			return fmt.Errorf("%w: error while closing output stream: %s", err, closeErr)
+		}
+		return fmt.Errorf("closing output stream: %w", closeErr)
+	}
+	// if there was an error while receiving output, return that error, this will be nil otherwise
+	return err
 }
