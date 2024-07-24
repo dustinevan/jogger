@@ -278,7 +278,7 @@ As with CPU, IO uses a weight based strategy by default. For this implementation
 #### cgroup.FSManager
 This implementation doesn't require any dynamic management of cgroups. Everything needed can be written before a job starts, and can be removed after a job ends.
 
-Because managing cgroups involves creating, deleting, writing, and reading files, a new package `cgroup` with a struct `FSManager` is created to encapsulate this logic. The `Setup` and `Teardown` functions earlier are calls to FSManager's `AddGroup`, and `RemoveGroup` methods.
+Because managing cgroups involves creating, deleting, writing, and reading files, a new package `cgroup` with a struct `FSManager` is created to encapsulate this logic. The `Setup` and `Teardown` functions described earlier are calls to FSManager's `AddGroup`, and `RemoveGroup` methods.
 
 #### Testing That cgroups are working
 To test that limits are being respected, we can use three programs.
