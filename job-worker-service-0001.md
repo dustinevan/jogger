@@ -280,13 +280,13 @@ This implementation doesn't require any dynamic management of cgroups. Everythin
 
 Because managing cgroups involves creating, deleting, writing, and reading files, a new package `cgroup` with a struct `FSManager` is created to encapsulate this logic. The `Setup` and `Teardown` functions earlier are calls to FSManager's `AddGroup`, and `RemoveGroup` methods.
 
-#### Test Plan
+#### Testing That cgroups are working
 To test that limits are being respected, we can use three programs.
 1. CPU: Generating password hashes with bcrypt -- `bcrypt.GenerateFromPassword([]byte(password), bcrypt.MaxCost)`
 2. Memory: Calling a function in a loop that uses `string.Split()` on a long string to find the number of spaces. This kind of program doesn't need much memory to function, but it allocates and creates a lot of garbage to clean up. Memory limits will throttle the program rather than the OOM killer stopping it.
 3. I/O: Read and write to a file in a loop.
 
-For each program, we create three jobs that run for 10 seconds. When jobs stop, they should output the number of loops performed. By comparing the outputs over, say, 10 runs, we can test whether the cumulative loops for each job trend toward 1/3 of the cumulative total.
+For each program, we create 10 jobs that run concurrently for 10 seconds. When jobs stop, they should output the number of loops performed. By comparing the outputs over, say, 10 runs, we can test whether the cumulative loops for each job trend toward 1/10th of the cumulative total. A job that starts, stops and reads the output of `systemd-cgtop` could be used to adjust these numbers.
 
 
 > **_Note:_** _In this implementation, the Jogger server is run as root. In the future, [delegation](https://man7.org/linux/man-pages/man7/cgroups.7.html) could be used to allow the server to run as a non-root user._
