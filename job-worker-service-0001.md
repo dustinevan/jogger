@@ -145,8 +145,8 @@ When the client asks to start a job, first the server creates a new job instance
 When construction is complete, the `Start` method is called on a job. This method starts a goroutine that does the following:
 - Sets the job status to Running
 - Calls `Start` on the `exec.Cmd`
-- Calls the `cgroups-v2` `Setup` function
-- Defers the `cgroups-v2` `Teardown` function
+- Calls the `cgroups-v2` `Setup` function -- which [creates a new cgroup](#cgroups-v2) for the job 
+- Defers the `cgroups-v2` `Teardown` function -- which [removes the cgroup](#cgroups-v2) when the job is done
 - Defers setting the status to completed if the status is still in running state
 - Waits for the cmd to finish
 
@@ -159,8 +159,8 @@ This functionality is encapsulated in the `OutputStreamer` struct.
 ```go
 type OutputStreamer struct {
     // stdout and stderr are combined and written into the output byte slice 
-	output []byte
-	writerClosed atomic.Bool
+    output []byte
+    writerClosed atomic.Bool
 }
 ...
 // OutputStreamer is an io.Writer and the jobs `exec.Cmd` Stdout and Stderr are set to this instance
@@ -207,10 +207,87 @@ We skip the CLI, Jogger Server, and Job Manager in this diagram to focus on the 
 #### Getting the Status 
 - Look up the job by username and id, then return the status
 
-#### cgroups-v2
-cgroups can be manually managed through the cgroup file system found at `/sys/fs/cgroup`. The cgroupfs controls resource allocation according to the directory structure. By making new directories in the structure, sibling directories are given equal resources by default.
+### cgroups-v2
+The Jogger Server uses [cgroups](https://man7.org/linux/man-pages/man7/cgroups.7.html) to manage CPU, memory, and IO resources for jobs. The jogger server itself, runs in the root cgroup, but creates a separate cgroup for each job. The controllers made available to job cgroups are limited to, CPU, IO, and Memory, by creating an intermediate group `/sys/fs/cgroup/jogger` and writing `cpu`, `memory`, and `io` to its `cgroup.subtree_control` file (this also must be done to the root `cgroup.subtree_control` as well). Job cgroups are children of `/sys/fs/cgroup/jogger` group. 
 
-The Jogger cgroup implementation does the following:
-- When the Jogger server starts, a new cgroup is made for it: `mkdir /sys/fs/cgroup/jogger/`
-- The cpu, memory, and io controller are added for the jogger cgroup and its children
-- When a new job is created it is started in the jogger cgroup using `cgexec -g cpu,memory,io:jogger <cmd>`
+```bash
+# Example of setting up the jogger cgroup
+echo "+cpu +memory +io" > /sys/fs/cgroup/cgroup.subtree_control
+mkdir /sys/fs/cgroup/jogger
+echo "+cpu +memory +io" > /sys/fs/cgroup/jogger/cgroup.subtree_control
+```
+
+```mermaid
+flowchart LR
+   
+    subgraph Root cgroup
+        A1[controllers]
+        A2[Jogger Server Process]
+    end
+
+ 
+ 
+    subgraph Jogger cgroup
+        B1[subtree_control cpu, memory, io]
+    end
+
+    subgraph Job cgroups
+        C1[Job1 cgroup]
+        C2[Job2 cgroup]
+        C3[Job3 cgroup]
+    end
+    
+    A1 --> B1
+    B1 --> C1
+    B1 --> C2
+    B1 --> C3
+
+    style A1 fill:#ffcccc,stroke:#333,stroke-width:2px
+    style A2 fill:#ffcccc,stroke:#333,stroke-width:2px
+    style B1 fill:#ffebcc,stroke:#333,stroke-width:2px
+    style C1 fill:#ffffcc,stroke:#333,stroke-width:2px
+    style C2 fill:#ffffcc,stroke:#333,stroke-width:2px
+    style C3 fill:#ffffcc,stroke:#333,stroke-width:2px
+    
+```
+
+#### Starting a Job in a cgroup
+When a job is sent to the server, the server creates a new cgroup for the job[^1] using the `job_id` as the directory name. Then, when the job is created, the exec.Cmd is configured with the file descriptor of the new cgroup. This feature makes use of the [clone3 syscall](https://man7.org/linux/man-pages/man2/clone.2.html) with the `CLONE_INTO_GROUP` flag. The result is that, even though the server is running in the root cgroup, it can start a new process in the job cgroup.
+
+#### Cleaning Up cgroups
+Jogger cleans up empty cgroups by waiting for the job to finish and polling the `cgroup.events` file for `populated 0`. When this is detected, the server removes the cgroup directory.
+
+#### CPU Management
+By default each cgroup has a cpu.weight file with a value of 100. When distributing cpu time, all child cgroup cpu weights are summed and divided by the number of processes. The implementation uses these defaults. In the future, Jogger may need to implement a strategy to limit the cost of context switching when many jobs are running at once. 
+
+#### Memory Management
+For this implementation, Jogger is configured with a memory target, and jobs are set with `memory.high` as 20% of that target (in bytes). In a future implementation, an algorithm could be produced that dynamically writes `memory.high` values in cgroups that reflect how many jobs run on the server, and the standard deviation of memory needs.    
+
+From the docs:
+> "memory.high" is the main mechanism to control memory usage.
+Over-committing on high limit (sum of high limits > available memory)
+and letting global memory pressure to distribute memory according to
+usage is a viable strategy. Because breach of the high limit doesn't trigger the OOM killer but
+throttles the offending cgroup, a management agent has ample
+opportunities to monitor and take appropriate actions such as granting
+more memory or terminating the workload.
+
+#### IO Management
+As with CPU, IO uses a weight based strategy by default. For this implementation, Jogger will not change these defaults. 
+
+
+#### Test Plan
+To test that limits are being respected, we can use three programs. 
+1. CPU: Generating password hashes with bcrypt -- `bcrypt.GenerateFromPassword([]byte(password), bcrypt.MaxCost)`
+2. Memory: Calling a function in a loop that uses `string.Split()` on a long string to find the number of spaces. This kind of program doesn't need much memory to function, but it allocates and creates a lot of garbage to clean up. Memory limits will throttle the program rather than the OOM killer stopping it.  
+3. I/O: Read and write to a file in a loop. 
+
+For each program, we create three jobs that run for 10 seconds. When jobs stop, they should output the number of loops performed. By comparing the outputs over, say, 10 runs, we can test whether the cumulative loops for each job trend toward 1/3 of the cumulative total. 
+
+
+> **_Note:_** _In this implementation, the Jogger server is run as root. In the future, [delegation](https://man7.org/linux/man-pages/man7/cgroups.7.html) could be used to allow the server to run as a non-root user._
+
+
+[^1]: For this implementation, the server creates a new cgroup for each job, in the future a pool of cgroups could be used to avoid the overhead of creating and removing cgroups for each job.
+
+[docs](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/Documentation/admin-guide/cgroup-v2.rst?h=v5.15.163)
