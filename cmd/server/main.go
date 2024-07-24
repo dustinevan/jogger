@@ -113,7 +113,7 @@ func run(log *zap.SugaredLogger) error {
 
 	jobManager := job.NewManager(shutdownCtx)
 
-	joggerServer := api.NewServer(jobManager)
+	joggerServer := api.NewServer(jobManager, log)
 
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)))
 	joggerv1.RegisterJobServiceServer(server, joggerServer)

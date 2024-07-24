@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/dustinevan/jogger/lib/job"
+	"go.uber.org/zap"
 
 	jogv1 "github.com/dustinevan/jogger/pkg/gen/jogger/v1"
 	"google.golang.org/grpc/credentials"
@@ -14,20 +15,16 @@ import (
 type Server struct {
 	jogv1.UnimplementedJobServiceServer
 	manager *job.Manager
+	log     *zap.SugaredLogger
 }
 
-func NewServer(manager *job.Manager) *Server {
-	return &Server{manager: manager}
+func NewServer(manager *job.Manager, log *zap.SugaredLogger) *Server {
+	return &Server{manager: manager, log: log}
 }
 
 // Start starts a new job
 func (s Server) Start(ctx context.Context, req *jogv1.StartRequest) (*jogv1.StartResponse, error) {
-
-	// Style Note: Personally, I try not to read from the context any "lower" than this layer -- where
-	// "lower" means deeper into the API calls. Doing this makes it so the API method signatures
-	// give readers a clear picture of the data the API depends on.
-
-	// Get the username from the context and pass it to the manager
+	s.log.Infow("starting job", "cmd", req.Job.GetCmd(), "args", req.Job.GetArgs())
 	username, err := CommonNameFromContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("starting job: %w", err)
@@ -37,11 +34,13 @@ func (s Server) Start(ctx context.Context, req *jogv1.StartRequest) (*jogv1.Star
 	if err != nil {
 		return nil, fmt.Errorf("starting job: %w", err)
 	}
+	s.log.Infow("job started", "jobID", jobID, "username", username)
 	return &jogv1.StartResponse{JobId: jobID}, nil
 }
 
 // Stop stops a job
 func (s Server) Stop(ctx context.Context, req *jogv1.StopRequest) (*jogv1.StopResponse, error) {
+	s.log.Infow("stopping job", "jobID", req.JobId)
 	username, err := CommonNameFromContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("stopping job: %w", err)
@@ -50,11 +49,13 @@ func (s Server) Stop(ctx context.Context, req *jogv1.StopRequest) (*jogv1.StopRe
 	if err != nil {
 		return nil, fmt.Errorf("stopping job: %w", err)
 	}
+	s.log.Infow("job stopped", "jobID", req.JobId, "username", username)
 	return &jogv1.StopResponse{}, nil
 }
 
 // Status gets the status of a job
 func (s Server) Status(ctx context.Context, req *jogv1.StatusRequest) (*jogv1.StatusResponse, error) {
+	s.log.Infow("getting job status", "jobID", req.JobId)
 	username, err := CommonNameFromContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("getting job status: %w", err)
@@ -63,15 +64,18 @@ func (s Server) Status(ctx context.Context, req *jogv1.StatusRequest) (*jogv1.St
 	if err != nil {
 		return nil, fmt.Errorf("getting job status: %w", err)
 	}
+	s.log.Infow("job status", "jobID", req.JobId, "status", status, "username", username)
 	return &jogv1.StatusResponse{Status: status}, nil
 }
 
 // Output streams the output of a job
 func (s Server) Output(req *jogv1.OutputRequest, srv jogv1.JobService_OutputServer) error {
+	s.log.Infow("streaming output", "jobID", req.JobId)
 	username, err := CommonNameFromContext(srv.Context())
 	if err != nil {
 		return fmt.Errorf("streaming output: %w", err)
 	}
+	defer s.log.Infow("streaming output complete", "jobID", req.JobId, "username", username)
 
 	stream, err := s.manager.OutputStream(srv.Context(), username, req.JobId)
 	if err != nil {

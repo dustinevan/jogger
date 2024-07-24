@@ -3,6 +3,7 @@ package job
 import (
 	"context"
 	"fmt"
+	"github.com/dustinevan/jogger/lib/cgroup"
 	jogv1 "github.com/dustinevan/jogger/pkg/gen/jogger/v1"
 	"github.com/google/uuid"
 	"sync"
@@ -15,9 +16,11 @@ var ErrJobNotFound = fmt.Errorf("job not found")
 type Manager struct {
 	// jobMap is a map[username]map[jobID]*Job
 	jobMap map[string]*Job
-	mu     sync.RWMutex
 
+	mu          sync.RWMutex
 	shutdownCtx context.Context
+
+	cgroupFSManager *cgroup.FSManager
 }
 
 // NewManager creates a new Manager
@@ -32,10 +35,18 @@ func NewManager(shutdownCtx context.Context) *Manager {
 func (m *Manager) Start(ctx context.Context, username string, cmd string, args ...string) (string, error) {
 	jobID := uuid.NewString()
 
-	j, err := StartNewJob(m.shutdownCtx, cmd, args...)
+	// Add a new cgroup for the job
+	cgroupFD, err := m.cgroupFSManager.AddGroup(jobID)
 	if err != nil {
 		return "", fmt.Errorf("starting job: %w", err)
 	}
+	defer m.scheduleCGroupCleanup(jobID)
+
+	j, err := StartNewJob(m.shutdownCtx, cgroupFD, cmd, args...)
+	if err != nil {
+		return "", fmt.Errorf("starting job: %w", err)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.jobMap[keyString(username, jobID)] = j
@@ -89,4 +100,23 @@ func (m *Manager) getJob(username, jobID string) (*Job, error) {
 
 func keyString(username, jobID string) string {
 	return jobID + "-" + username
+}
+
+// scheduleCGroupCleanup schedules the removal of a cgroup for a job
+// cgroups can't be removed util the processes inside them have exited.
+// at the system level, a cgroup is removed by removing the directory.
+// before removing the directory the cgroup.events file must contain
+// 'populated 0'. The RemoveGroup(jobID) method kicks off a goroutine
+// the polls the cgroup.events file, and removes the directory once
+// it reads populated 0. To reduce load, we don't kick off this
+// goroutine until the job is done. This call kicks off a goroutine
+// that Waits on the job, and then makes a call to RemoveGroup.
+//
+// Note that these goroutines don't need to also listen for a
+// shutdown signal. This is because a shutdown of the system
+// will trigger shutdown of all the jobs. There should be a buffer
+// between CommandWaitDelay and the server shutdown timeout for all
+// this cleanup to occur.
+func (m *Manager) scheduleCGroupCleanup(jobID string) {
+	m.cgroupFSManager.RemoveGroup(jobID)
 }
