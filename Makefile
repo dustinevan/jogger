@@ -29,12 +29,12 @@ docker-build:
 # Run the local development ubuntu image
 .PHONY: docker-run
 docker-run: docker-build
-	docker run jogger-server-amd64:$(VERSION)
+	docker run -p 50051:50051 jogger-server-amd64:$(VERSION)
 
 # Run the local development ubuntu image with a shell
 .PHONY: docker-shell
 docker-shell: docker-build
-	docker run -it jogger-server-amd64:$(VERSION) /bin/sh
+	docker run -it -p 50051:50051 jogger-server-amd64:$(VERSION) /bin/sh
 
 # Generate the protobuf and grpc code
 .PHONY: grpc

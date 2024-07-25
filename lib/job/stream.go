@@ -37,6 +37,8 @@ type OutputStreamer struct {
 	mu                sync.RWMutex
 	writerClosed      atomic.Bool
 	streamMessageSize int
+
+	length atomic.Int64
 }
 
 func NewOutputStreamer(options ...OutputStreamerOption) *OutputStreamer {
@@ -61,6 +63,7 @@ func (o *OutputStreamer) Write(b []byte) (int, error) {
 		return 0, ErrOutputStreamerClosed
 	}
 	o.output = append(o.output, b...)
+	o.length.Store(int64(len(o.output)))
 	return len(b), nil
 }
 
@@ -73,11 +76,11 @@ func (o *OutputStreamer) CloseWriter() {
 // This design enables large output buffers to be read by many clients without incurring the cost of
 // copying the data.
 func (o *OutputStreamer) Next(index int) []byte {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	if index >= len(o.output) {
+	if int64(index) >= o.length.Load() {
 		return nil
 	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
 	if index+o.streamMessageSize > len(o.output) {
 		return o.output[index:]
 	}
@@ -105,14 +108,14 @@ func (o *OutputStreamer) NewStream(ctx context.Context) <-chan []byte {
 		index := 0
 		for {
 			// send more data if there is any
-			if index < len(o.output) {
+			if int64(index) < o.length.Load() {
 				msg := o.Next(index)
 				index += len(msg)
 				stream <- msg
 				// this loops so that we don't wait on the ticker to check for more data
 				continue
 			}
-			if index == len(o.output) {
+			if int64(index) == o.length.Load() {
 				// only close the channel if the OutputStreamer is no longer being written to
 				// this happens when the job has exited
 				if o.writerClosed.Load() {
