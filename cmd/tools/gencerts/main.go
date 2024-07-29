@@ -29,24 +29,22 @@ func main() {
 	fmt.Println("Certificates generated successfully.")
 	// Print exports needed for client and server
 	fmt.Printf(`
-    The CLI requires the following environment variables:
-	
+    To use the generated certificates, set the following environment variables:
+    For the server:
+    
+        export JOGGER_CA_CERT_FILE=%s
+        export JOGGER_SERVER_PORT=%d
+        export JOGGER_SERVER_CERT_FILE=%s
+        export JOGGER_SERVER_KEY_FILE=%s
+    
+    For the client:
+    
         export JOGGER_CA_CERT_FILE=%s
         export JOGGER_USER_CERT_FILE=%s
         export JOGGER_USER_KEY_FILE=%s
-
-    The server requires the following environment variables:
-
-        export JOGGER_CA_CERT_FILE=%s
-        export JOGGER_SERVER_CERT_FILE=%s
-        export JOGGER_SERVER_KEY_FILE=%s
-        export JOGGER_SERVER_PORT=%d
-
-    Optionally, for the CLI also set: 
-
         export JOGGER_HOST=localhost:50051
 
-`, certAbsPath, clientCertAbsPath, clientKeyAbsPath, certAbsPath, serverCertAbsPath, serverKeyAbsPath, 50051)
+`, certAbsPath, 50051, serverCertAbsPath, serverKeyAbsPath, certAbsPath, clientCertAbsPath, clientKeyAbsPath)
 }
 
 var maxInt128 = new(big.Int).Lsh(big.NewInt(1), 128)
