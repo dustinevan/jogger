@@ -1,3 +1,5 @@
+This is a two-week project I did for an interview. 
+
 # jogger
 
 A simple remote job runner.
@@ -36,5 +38,3 @@ jog run -- echo "Hello, World!"
 # 8. Checkout what jog can do:
 jog --help
 ```
-
-

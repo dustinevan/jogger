@@ -12,7 +12,7 @@ Jogger is a system that allows users to run jobs on remote servers. It includes 
 ## Details
 
 ### CLI
-`jog` 
+`jog`
 
 #### Example Usage
 ```bash
@@ -66,7 +66,7 @@ this command is terminated or the job moves to a done state.
 Our users have likely run jobs on remote servers via ssh. The Jogger CLI is different in a key way--it's not interactive. To make the CLI more familiar to these users, the goal is to reduce the CLI's footprint so that users can focus on the commands/jobs they run. The following design decisions stem from this thinking:
 
 #### Jobs are Slices of Strings.
-When starting a job, the `jog` CLI slices `os.Args` to remove itself and its own arguments, `--` is used as a divider for clarity. 
+When starting a job, the `jog` CLI slices `os.Args` to remove itself and its own arguments, `--` is used as a divider for clarity.
 
 The remaining `[]string` defines the job, where `arg[0]` is the command/binary to run on the server, and `arg[1:]` represents arguments to that command. This strategy avoids repeated flags for arguments and the environment. However, a downside to this approach is that server-side shell substitution requires careful escaping and the use of `bash -c`.
 
@@ -85,29 +85,29 @@ Each use of `jog` creates a new connection with mTLS. For this to work, the user
 ### GRPC
 GRPC is used for communication between Client and Server. The CLI subcommands described above map to RPC calls to a Jogger Server. See: [job_service.proto](https://github.com/dustinevan/jogger/blob/develop/pkg/proto/job_service.proto)
 
-[`buf`](https://buf.build/) is being used to generate the client, server stubs, and related protobuf code. The Makefile includes `make grpc` for this purpose.  
+[`buf`](https://buf.build/) is being used to generate the client, server stubs, and related protobuf code. The Makefile includes `make grpc` for this purpose.
 
 ### Security
-Client and Server communicate over a connection with [mTLS](https://en.wikipedia.org/wiki/Mutual_authentication#mTLS). Jogger is configured to use [X.509 certificates](https://www.rfc-editor.org/rfc/rfc5280) that have been manually generated using `make gen-certs` For this project, we assume that some future outside service will be responsible for generating and distributing the necessary certificates and keys. 
+Client and Server communicate over a connection with [mTLS](https://en.wikipedia.org/wiki/Mutual_authentication#mTLS). Jogger is configured to use [X.509 certificates](https://www.rfc-editor.org/rfc/rfc5280) that have been manually generated using `make gen-certs` For this project, we assume that some future outside service will be responsible for generating and distributing the necessary certificates and keys.
 
-#### Notes on Keys and Certificates 
+#### Notes on Keys and Certificates
 For TLS keys, this project uses the ECDSA algorithm with the P256 curve. Keys are generated for the CA, the Jogger Server, and the User who has access to the CLI.
 
 ```Go
 privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 ```
 Three certificates are then generated:
-1. _Self-Signed CA Certificate_: This certificate is used by both the Client and the Server to verify the identity of the other party. 
+1. _Self-Signed CA Certificate_: This certificate is used by both the Client and the Server to verify the identity of the other party.
 2. _Server Certificate_: The Jogger Service uses this certificate to prove its identity to the CLI.
 3. _User Certificate_: The User Certificate has the username in the Common Name (CN)) field found here: `Userx509Certificate.Subject.CommonName` see: [Access Control](#access-control)
 
-The file locations of these certificates are then added to the user or server environment vars, and read when a connection with mTLS is made.  
+The file locations of these certificates are then added to the user or server environment vars, and read when a connection with mTLS is made.
 
 #### TLS Cipher Suites
 TLS will be configured to support the `TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256` cipher suite, which is the [first preference](https://go.dev/src/crypto/tls/cipher_suites.go) in the go documentation. This suite only supports TLS 1.2 and contains our chosen algorithm.
 
-### Access Control 
-Internally, the Jogger Server ensures that each user only has access to their jobs. To do this, usernames are included in Common Name field found in User Certificates. It is assumed that an external auth system will add these usernames to certs, and ensure usernames are unique. Currently, `make gen-certs` sets the Common Name to `$USER` in the generated User Certificate. If needed this can be modified like so `make USER=lucy gen-certs` To create multiple users the underlying gen-certs code should be edited.   
+### Access Control
+Internally, the Jogger Server ensures that each user only has access to their jobs. To do this, usernames are included in Common Name field found in User Certificates. It is assumed that an external auth system will add these usernames to certs, and ensure usernames are unique. Currently, `make gen-certs` sets the Common Name to `$USER` in the generated User Certificate. If needed this can be modified like so `make USER=lucy gen-certs` To create multiple users the underlying gen-certs code should be edited.
 
 When a request is made, the User Certificate can be retrieved from the context using
 ```go
@@ -133,7 +133,7 @@ export JOGGER_SERVER_KEY=<path-to-user-private-key>
 ```
 
 ### Job Manager
-The JobManager is an internal service that manages the lifecycle of jobs. It holds a map of Job by job_id:username. Calls to it's exported API methods, `Start`, `Stop`, `Status`, and `Output`, search for the job by username and `job_id` and call associated methods on that Job. Job instances are wrappers around `exec.Cmd` that include extra functionality for output streaming, cancellation, status, and `cgroup-v2` management. 
+The JobManager is an internal service that manages the lifecycle of jobs. It holds a map of Job by job_id:username. Calls to it's exported API methods, `Start`, `Stop`, `Status`, and `Output`, search for the job by username and `job_id` and call associated methods on that Job. Job instances are wrappers around `exec.Cmd` that include extra functionality for output streaming, cancellation, status, and `cgroup-v2` management.
 
 #### Starting a Job
 When the client asks to start a job, first the server creates a new job instance. During construction:
@@ -145,7 +145,7 @@ When the client asks to start a job, first the server creates a new job instance
 When construction is complete, the `Start` method is called on a job. This method starts a goroutine that does the following:
 - Sets the job status to Running
 - Calls `Start` on the `exec.Cmd`
-- Calls the `cgroups-v2` `Setup` function -- which [creates a new cgroup](#cgroups-v2) for the job 
+- Calls the `cgroups-v2` `Setup` function -- which [creates a new cgroup](#cgroups-v2) for the job
 - Defers the `cgroups-v2` `Teardown` function -- which [removes the cgroup](#cgroups-v2) when the job is done
 - Defers setting the status to completed if the status is still in running state
 - Waits for the cmd to finish
@@ -184,7 +184,7 @@ The OutputStreamer handles closure and cancellation in the following ways:
 
 
 #### Stopping a Job
-When the `Stop` method called on a job, the status is set and the internal context cancellation function is called. Jogger is designed to cascade this cancellation through all underlying goroutines. 
+When the `Stop` method called on a job, the status is set and the internal context cancellation function is called. Jogger is designed to cascade this cancellation through all underlying goroutines.
 
 > **_Note:_** _The `exec.Cmd` struct and API internally provide most of the functionality needed for cancellation and output streaming. Jogger is designed around preferring this functionality, and wrapping it with what's needed to support our output streaming and `cgroup-v2` requirements. In the diagram below, the internals of `exec.Cmd` are not shown._
 
@@ -201,14 +201,14 @@ We skip the CLI, Jogger Server, and Job Manager in this diagram to focus on the 
 5. The underlying process represented by `exec.Cmd` exits normally or is killed based on the WaitDelay.
 6. The error output of `cmd.Wait()` is used to determine the final status of the job
 7. The goroutine waiting for the process to finish defer closes the OutputStreamer and exits.
-8. OutputStreamer finishes sending all data to the client and closes the channel used for streaming 
+8. OutputStreamer finishes sending all data to the client and closes the channel used for streaming
 9. The client receives the last of the output and the command prompt is returned
 
-#### Getting the Status 
+#### Getting the Status
 - Look up the job by username and id, then return the status
 
 ### cgroups-v2
-The Jogger Server uses [cgroups](https://man7.org/linux/man-pages/man7/cgroups.7.html) to manage CPU, memory, and IO resources for jobs. The jogger server itself, runs in the root cgroup, but creates a separate cgroup for each job. The controllers made available to job cgroups are limited to, CPU, IO, and Memory, by creating an intermediate group `/sys/fs/cgroup/jogger` and writing `cpu`, `memory`, and `io` to its `cgroup.subtree_control` file (this also must be done to the root `cgroup.subtree_control` as well). Job cgroups are children of `/sys/fs/cgroup/jogger` group. 
+The Jogger Server uses [cgroups](https://man7.org/linux/man-pages/man7/cgroups.7.html) to manage CPU, memory, and IO resources for jobs. The jogger server itself, runs in the root cgroup, but creates a separate cgroup for each job. The controllers made available to job cgroups are limited to, CPU, IO, and Memory, by creating an intermediate group `/sys/fs/cgroup/jogger` and writing `cpu`, `memory`, and `io` to its `cgroup.subtree_control` file (this also must be done to the root `cgroup.subtree_control` as well). Job cgroups are children of `/sys/fs/cgroup/jogger` group.
 
 ```bash
 # Example of setting up the jogger cgroup
@@ -258,10 +258,10 @@ When a job is sent to the server, the server creates a new cgroup for the job[^1
 Jogger cleans up empty cgroups by waiting for the job to finish and polling the `cgroup.events` file for `populated 0`. When this is detected, the server removes the cgroup directory.
 
 #### CPU Management
-By default each cgroup has a cpu.weight file with a value of 100. When distributing cpu time, all child cgroup cpu weights are summed and divided by the number of processes. The implementation uses these defaults. In the future, Jogger may need to implement a strategy to limit the cost of context switching when many jobs are running at once. 
+By default each cgroup has a cpu.weight file with a value of 100. When distributing cpu time, all child cgroup cpu weights are summed and divided by the number of processes. The implementation uses these defaults. In the future, Jogger may need to implement a strategy to limit the cost of context switching when many jobs are running at once.
 
 #### Memory Management
-For this implementation, Jogger is configured with a memory target, and jobs are set with `memory.high` as 20% of that target (in bytes). In a future implementation, an algorithm could be produced that dynamically writes `memory.high` values in cgroups that reflect how many jobs run on the server, and the standard deviation of memory needs.    
+For this implementation, Jogger is configured with a memory target, and jobs are set with `memory.high` as 20% of that target (in bytes). In a future implementation, an algorithm could be produced that dynamically writes `memory.high` values in cgroups that reflect how many jobs run on the server, and the standard deviation of memory needs.
 
 From the docs:
 > "memory.high" is the main mechanism to control memory usage.
@@ -273,16 +273,20 @@ opportunities to monitor and take appropriate actions such as granting
 more memory or terminating the workload.
 
 #### IO Management
-As with CPU, IO uses a weight based strategy by default. For this implementation, Jogger will not change these defaults. 
+As with CPU, IO uses a weight based strategy by default. For this implementation, Jogger will not change these defaults.
 
+#### cgroup.FSManager
+This implementation doesn't require any dynamic management of cgroups. Everything needed can be written before a job starts, and can be removed after a job ends.
 
-#### Test Plan
-To test that limits are being respected, we can use three programs. 
+Because managing cgroups involves creating, deleting, writing, and reading files, a new package `cgroup` with a struct `FSManager` is created to encapsulate this logic. The `Setup` and `Teardown` functions described earlier are calls to FSManager's `AddGroup`, and `RemoveGroup` methods.
+
+#### Testing That cgroups are working
+To test that limits are being respected, we can use three programs.
 1. CPU: Generating password hashes with bcrypt -- `bcrypt.GenerateFromPassword([]byte(password), bcrypt.MaxCost)`
-2. Memory: Calling a function in a loop that uses `string.Split()` on a long string to find the number of spaces. This kind of program doesn't need much memory to function, but it allocates and creates a lot of garbage to clean up. Memory limits will throttle the program rather than the OOM killer stopping it.  
-3. I/O: Read and write to a file in a loop. 
+2. Memory: Calling a function in a loop that uses `string.Split()` on a long string to find the number of spaces. This kind of program doesn't need much memory to function, but it allocates and creates a lot of garbage to clean up. Memory limits will throttle the program rather than the OOM killer stopping it.
+3. I/O: Read and write to a file in a loop.
 
-For each program, we create three jobs that run for 10 seconds. When jobs stop, they should output the number of loops performed. By comparing the outputs over, say, 10 runs, we can test whether the cumulative loops for each job trend toward 1/3 of the cumulative total. 
+For each program, we create 10 jobs that run concurrently for 10 seconds. When jobs stop, they should output the number of loops performed. By comparing the outputs over, say, 10 runs, we can test whether the cumulative loops for each job trend toward 1/10th of the cumulative total. A job that starts, stops and reads the output of `systemd-cgtop` could be used to adjust these numbers.
 
 
 > **_Note:_** _In this implementation, the Jogger server is run as root. In the future, [delegation](https://man7.org/linux/man-pages/man7/cgroups.7.html) could be used to allow the server to run as a non-root user._
