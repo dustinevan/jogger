@@ -23,3 +23,8 @@ go.work.sum
 
 Dockerfile
 .dockerignore
+
+# Local Dev Key and Certificate Files
+certs/
+
+.idea/
