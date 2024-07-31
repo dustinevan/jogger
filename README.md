@@ -1,5 +1,3 @@
-This is a project I did for an interview. 
-
 --- 
 authors: Dustin Currie (dustinevancurrie@gmail.com)
 state: draft
