@@ -1,9 +1,11 @@
-> **_Note:_** This is a project I recently wrote for an interview. It is not complete, and currently only runs in linux due to its use of cgroups. 
-
 --- 
 authors: Dustin Currie (dustinevancurrie@gmail.com)
 state: draft
 ---
+
+> **_Note:_** This is a project I recently wrote for an interview. It is not complete, and currently only runs in linux due to its use of cgroups. 
+
+
 
 # RFD 1: Job Runner Service
 
